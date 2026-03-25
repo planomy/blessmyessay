@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Essay Intake Portal</title>
+  <style>
+    :root{
+      --bg:#f5f7fb;
+      --card:#ffffff;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --line:#dbe3ef;
+      --accent:#2563eb;
+      --accent-dark:#1d4ed8;
+      --ok:#0f766e;
+      --error:#b91c1c;
+      --shadow:0 16px 40px rgba(15,23,42,0.08);
+      --radius:18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body{
+      margin:0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, #eef3fb 0%, #f8fafc 100%);
+      color:var(--text);
+      min-height:100vh;
+      padding:32px 16px;
+    }
+
+    .wrap{
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+
+    .card-header{
+      padding:24px 28px 10px;
+    }
+
+    h1{
+      margin:0 0 8px;
+      font-size:1.8rem;
+      line-height:1.2;
+    }
+
+    .sub{
+      margin:0;
+      color:var(--muted);
+      font-size:0.98rem;
+    }
+
+    form{
+      padding:24px 28px 28px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:16px;
+    }
+
+    .field{
+      margin-bottom:16px;
+    }
+
+    .field.full{
+      grid-column:1 / -1;
+    }
+
+    label{
+      display:block;
+      font-weight:700;
+      margin-bottom:8px;
+      font-size:0.95rem;
+    }
+
+    input, textarea{
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:12px 14px;
+      font-size:0.98rem;
+      color:var(--text);
+      background:#fff;
+      outline:none;
+      transition:border-color .15s ease, box-shadow .15s ease;
+    }
+
+    input:focus, textarea:focus{
+      border-color:var(--accent);
+      box-shadow:0 0 0 4px rgba(37,99,235,0.12);
+    }
+
+    textarea{
+      min-height:120px;
+      resize:vertical;
+    }
+
+    .essay-box{
+      min-height:260px;
+    }
+
+    .actions{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      margin-top:8px;
+      flex-wrap:wrap;
+    }
+
+    button{
+      border:none;
+      background:var(--accent);
+      color:#fff;
+      padding:12px 18px;
+      border-radius:12px;
+      font-size:0.98rem;
+      font-weight:700;
+      cursor:pointer;
+      transition:transform .05s ease, background .15s ease;
+    }
+
+    button:hover{ background:var(--accent-dark); }
+    button:active{ transform:translateY(1px); }
+
+    .status{
+      font-size:0.95rem;
+      color:var(--muted);
+      min-height:22px;
+    }
+
+    .status.ok{ color:var(--ok); }
+    .status.error{ color:var(--error); }
+
+    .note{
+      margin-top:16px;
+      color:var(--muted);
+      font-size:0.9rem;
+      line-height:1.45;
+    }
+
+    @media (max-width: 700px){
+      .grid{ grid-template-columns:1fr; }
+      .card-header, form{ padding-left:18px; padding-right:18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="card-header">
+        <h1>Essay Intake Portal</h1>
+        <p class="sub">Submit student writing to your Google Sheet.</p>
+      </div>
+
+      <form id="essayForm">
+        <div class="grid">
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" required />
+          </div>
+
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" required />
+          </div>
+
+          <div class="field">
+            <label for="task">Task</label>
+            <input id="task" name="task" type="text" required />
+          </div>
+
+          <div class="field">
+            <label for="wordCount">Word Count</label>
+            <input id="wordCount" name="wordCount" type="number" min="0" required />
+          </div>
+
+          <div class="field full">
+            <label for="teacherConcerns">Teacher Concerns</label>
+            <textarea id="teacherConcerns" name="teacherConcerns" placeholder="Add any teacher notes or concerns here..."></textarea>
+          </div>
+
+          <div class="field full">
+            <label for="essayDraft">Essay Draft</label>
+            <textarea id="essayDraft" name="essayDraft" class="essay-box" required placeholder="Paste the student essay draft here..."></textarea>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit" id="submitBtn">Submit</button>
+          <div id="status" class="status"></div>
+        </div>
+
+        <div class="note">
+          This version uses a local-file-friendly handoff approach for Google Apps Script.
+          Because the request uses <code>no-cors</code>, the browser cannot read a true success response.
+          It can only confirm that the request was sent without the browser blocking it.
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyulMqPg8Are8Zo_AeWA6N-R-wNl4DoCzgkT8YuuNQFSsTJPF6iKZ-_p5fR3kUu_-wJDQ/exec";
+    const form = document.getElementById("essayForm");
+    const statusEl = document.getElementById("status");
+    const submitBtn = document.getElementById("submitBtn");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      statusEl.textContent = "Sending...";
+      statusEl.className = "status";
+      submitBtn.disabled = true;
+
+      const payload = {
+        name: document.getElementById("name").value.trim(),
+        email: document.getElementById("email").value.trim(),
+        task: document.getElementById("task").value.trim(),
+        wordCount: document.getElementById("wordCount").value.trim(),
+        teacherConcerns: document.getElementById("teacherConcerns").value.trim(),
+        essayDraft: document.getElementById("essayDraft").value.trim(),
+        submittedAt: new Date().toISOString(),
+        source: "local-index-html"
+      };
+
+      try {
+        await fetch(WEB_APP_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        statusEl.textContent = "Request sent. Check your Google Sheet in a moment.";
+        statusEl.className = "status ok";
+        form.reset();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Could not reach the server.";
+        statusEl.className = "status error";
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
