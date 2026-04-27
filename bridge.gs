@@ -78,6 +78,16 @@ function doPost(e) {
     return corsJsonTextOutput_({ ok: false, error: 'Invalid JSON' });
   }
 
+  /** QUIK DRAFT FETCH — returns next row not marked processed (see isRowProcessed_). */
+  if (raw.action === 'fetchNext') {
+    return fetchNextHandler_();
+  }
+
+  /** QUIK DRAFT SEND — email feedback, write J, mark I/K/L processed. */
+  if (raw.action === 'sendFeedback') {
+    return sendFeedbackHandler_(raw);
+  }
+
   var name = pick_(raw, ['name']);
   var email = pick_(raw, ['email']);
   var task = pick_(raw, ['task']);
@@ -147,5 +157,127 @@ function ensureHeaderRow_(sheet) {
   }
   if (empty) {
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  }
+}
+
+/** Column I (9): teacher marked “Sent”. Column L (12): “YES” = grading complete. Either marks row processed for FETCH. */
+function isRowProcessed_(sheet, row) {
+  var colI = String(sheet.getRange(row, 9).getValue() || '')
+    .trim()
+    .toLowerCase();
+  var colL = sheet.getRange(row, 12).getValue();
+  var lStr = String(colL === true ? 'yes' : colL || '')
+    .trim()
+    .toUpperCase();
+  if (colI === 'sent') return true;
+  if (lStr === 'YES' || lStr === 'TRUE') return true;
+  return false;
+}
+
+/**
+ * First data row (≥2) that is not processed and has a name or essay in the sheet.
+ * Matches quikdraft/index.html: row, name, task, essay, focus / teacherConcerns.
+ */
+function fetchNextHandler_() {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet) {
+      return corsJsonTextOutput_({ ok: false, error: 'Sheet not found: ' + SHEET_NAME });
+    }
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return corsJsonTextOutput_({ row: null });
+    }
+    for (var r = 2; r <= lastRow; r++) {
+      if (isRowProcessed_(sheet, r)) continue;
+      var name = sheet.getRange(r, 2).getValue();
+      var essay = sheet.getRange(r, 7).getValue();
+      if (!name && !essay) continue;
+      var concerns = String(sheet.getRange(r, 6).getValue() || '');
+      return corsJsonTextOutput_({
+        row: r,
+        name: name != null ? String(name) : '',
+        task: String(sheet.getRange(r, 4).getValue() || ''),
+        essay: essay != null ? String(essay) : '',
+        teacherConcerns: concerns,
+        focus: concerns
+      });
+    }
+    return corsJsonTextOutput_({ row: null });
+  } catch (err) {
+    return corsJsonTextOutput_({ ok: false, error: String(err && err.message ? err.message : err) });
+  }
+}
+
+/** QUIK DRAFT — column J feedback text, C email, I/K/L status (same indices as fetchNext skip rules). */
+var FEEDBACK_TEXT_COL = 10;
+var STUDENT_EMAIL_COL = 3;
+var STUDENT_NAME_COL = 2;
+
+function escapeHtml_(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function sendFeedbackHandler_(data) {
+  var row = data.row;
+  var feedbackText = data.feedbackText != null ? String(data.feedbackText) : '';
+  var feedbackHtml = data.feedbackHtml != null ? String(data.feedbackHtml) : '';
+
+  if (!row || Number(row) < 2) {
+    return corsJsonTextOutput_({ ok: false, error: 'Invalid row' });
+  }
+
+  if (!feedbackText.trim() && !feedbackHtml.trim()) {
+    return corsJsonTextOutput_({ ok: false, error: 'Missing feedback text' });
+  }
+
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(SHEET_NAME);
+    if (!sheet) {
+      return corsJsonTextOutput_({ ok: false, error: 'Sheet not found: ' + SHEET_NAME });
+    }
+
+    var email = String(sheet.getRange(Number(row), STUDENT_EMAIL_COL).getValue() || '').trim();
+    if (!email) {
+      return corsJsonTextOutput_({ ok: false, error: 'No student email in row' });
+    }
+
+    var studentName = String(sheet.getRange(Number(row), STUDENT_NAME_COL).getValue() || '').trim();
+    var subject = studentName ? ('Writing feedback: ' + studentName) : 'Your writing feedback';
+
+    sheet.getRange(Number(row), FEEDBACK_TEXT_COL).setValue(feedbackText);
+
+    var plainTextBody = feedbackText;
+    var htmlBody = feedbackHtml;
+    if (!htmlBody.trim()) {
+      htmlBody =
+        '<div style="font-family:Segoe UI,system-ui,sans-serif;font-size:11pt;line-height:1.6;color:#334155;">' +
+        escapeHtml_(plainTextBody).replace(/\n/g, '<br>') +
+        '</div>';
+    }
+
+    MailApp.sendEmail({
+      to: email,
+      subject: subject,
+      body: plainTextBody,
+      htmlBody: htmlBody
+    });
+
+    sheet.getRange(Number(row), 9).setValue('Sent');
+    sheet.getRange(Number(row), 11).setValue(new Date());
+    sheet.getRange(Number(row), 12).setValue('YES');
+
+    return corsJsonTextOutput_({ ok: true, message: 'Sent' });
+  } catch (err) {
+    return corsJsonTextOutput_({
+      ok: false,
+      error: String(err && err.message ? err.message : err)
+    });
   }
 }

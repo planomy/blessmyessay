@@ -110,6 +110,31 @@
       min-height:260px;
     }
 
+    .confirm-final-row{
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      margin-top:4px;
+      padding:14px 16px;
+      background:#f8fafc;
+      border:1px solid var(--line);
+      border-radius:12px;
+    }
+
+    .confirm-final-row input[type="checkbox"]{
+      width:auto;
+      margin-top:3px;
+      flex-shrink:0;
+      accent-color:var(--accent);
+    }
+
+    .confirm-final-row label{
+      font-weight:600;
+      margin:0;
+      line-height:1.45;
+      cursor:pointer;
+    }
+
     .actions{
       display:flex;
       gap:12px;
@@ -133,6 +158,16 @@
     button:hover{ background:var(--accent-dark); }
     button:active{ transform:translateY(1px); }
 
+    #submitBtn.submit-btn--school-email,
+    #submitBtn.submit-btn--school-email:disabled{
+      background:#dc2626;
+      opacity:1;
+      cursor:not-allowed;
+    }
+    #submitBtn.submit-btn--school-email:hover{
+      background:#b91c1c;
+    }
+
     .status{
       font-size:0.95rem;
       color:var(--muted);
@@ -142,11 +177,12 @@
     .status.ok{ color:var(--ok); }
     .status.error{ color:var(--error); }
 
-    .note{
-      margin-top:16px;
-      color:var(--muted);
+    .email-warning{
+      display:none;
+      margin:8px 0 0;
       font-size:0.9rem;
-      line-height:1.45;
+      line-height:1.35;
+      color:var(--error);
     }
 
     @media (max-width: 700px){
@@ -159,8 +195,8 @@
   <div class="wrap">
     <div class="card">
       <div class="card-header">
-        <h1>Essay Intake Portal</h1>
-        <p class="sub">Submit student writing to your Google Sheet.</p>
+        <h1>Bless My Essay Please Mr C</h1>
+        <p class="sub">Submit your polished, proofread essay</p>
       </div>
 
       <form id="essayForm">
@@ -171,52 +207,99 @@
           </div>
 
           <div class="field">
-            <label for="email">Email</label>
+            <label for="email">Email (no .edu allowed)</label>
             <input id="email" name="email" type="email" required />
+            <p id="emailWarning" class="email-warning">
+              Please use a personal email. School (.edu) emails block outside grading.
+            </p>
           </div>
 
           <div class="field">
-            <label for="task">Task</label>
+            <label for="task">Task Objectives</label>
             <input id="task" name="task" type="text" required />
           </div>
 
           <div class="field">
-            <label for="wordCount">Word Count</label>
+            <label for="wordCount">Task Word Count</label>
             <input id="wordCount" name="wordCount" type="number" min="0" required />
           </div>
 
           <div class="field full">
-            <label for="teacherConcerns">Teacher Concerns</label>
-            <textarea id="teacherConcerns" name="teacherConcerns" placeholder="Add any teacher notes or concerns here..."></textarea>
+            <label for="teacherConcerns">Add any particular focus you want checked</label>
+            <textarea id="teacherConcerns" name="teacherConcerns" ></textarea>
           </div>
 
           <div class="field full">
-            <label for="essayDraft">Essay Draft</label>
-            <textarea id="essayDraft" name="essayDraft" class="essay-box" required placeholder="Paste the student essay draft here..."></textarea>
+            <label for="essayDraft">Paste essay below - text only plz (no pictures)</label>
+            <textarea id="essayDraft" name="essayDraft" class="essay-box"></textarea>
           </div>
         </div>
 
+        <div class="confirm-final-row field full">
+          <input type="checkbox" id="finalCopyConfirm" name="finalCopyConfirm" required />
+          <label for="finalCopyConfirm">Yes Mr C, I confirm this is my final copy and I have fixed up my draft issues.</label>
+        </div>
+
         <div class="actions">
-          <button type="submit" id="submitBtn">Submit</button>
+          <button type="submit" id="submitBtn">BLESS IT</button>
           <div id="status" class="status"></div>
         </div>
 
-        <div class="note">
-          This version uses a local-file-friendly handoff approach for Google Apps Script.
-          Because the request uses <code>no-cors</code>, the browser cannot read a true success response.
-          It can only confirm that the request was sent without the browser blocking it.
-        </div>
+        
       </form>
     </div>
   </div>
 
   <script>
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyulMqPg8Are8Zo_AeWA6N-R-wNl4DoCzgkT8YuuNQFSsTJPF6iKZ-_p5fR3kUu_-wJDQ/exec";
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw1DuwokbFs5Dl-v21gTSjxWJ6Z11eQpYgD6f5VxFp6oMKlfUdM_6-COxKkEdHhLbb-uQ/exec";
     const form = document.getElementById("essayForm");
     const statusEl = document.getElementById("status");
     const submitBtn = document.getElementById("submitBtn");
+    const emailInput = document.getElementById("email");
+    const concernsInput = document.getElementById("teacherConcerns");
+
+// Set default structure
+concernsInput.value = "1. \n2. \n3. ";
+
+concernsInput.addEventListener("input", () => {
+  let lines = concernsInput.value.split("\n");
+
+  // Always keep exactly 3 lines
+  lines = lines.slice(0, 3);
+
+  // Ensure numbering stays correct
+  lines = lines.map((line, index) => {
+    const text = line.replace(/^\d+\.\s*/, ""); // remove old number
+    return `${index + 1}. ${text}`;
+  });
+
+  concernsInput.value = lines.join("\n");
+});
+    const emailWarningEl = document.getElementById("emailWarning");
+    const submitBtnDefaultText = submitBtn.textContent;
+
+    function syncEmailFieldValidation() {
+      const hasEdu = emailInput.value.toLowerCase().includes(".edu");
+      emailWarningEl.style.display = hasEdu ? "block" : "none";
+      submitBtn.disabled = hasEdu;
+      if (hasEdu) {
+        submitBtn.textContent = "NUP, SOZ!";
+        submitBtn.classList.add("submit-btn--school-email");
+      } else {
+        submitBtn.textContent = submitBtnDefaultText;
+        submitBtn.classList.remove("submit-btn--school-email");
+      }
+    }
+
+    emailInput.addEventListener("input", syncEmailFieldValidation);
 
     form.addEventListener("submit", async (e) => {
+      const emailRaw = document.getElementById("email").value.trim();
+      if (emailRaw.toLowerCase().includes(".edu")) {
+        e.preventDefault();
+        return;
+      }
+
       e.preventDefault();
 
       statusEl.textContent = "Sending...";
@@ -244,9 +327,10 @@
           body: JSON.stringify(payload)
         });
 
-        statusEl.textContent = "Request sent. Check your Google Sheet in a moment.";
+        statusEl.textContent = "Submission received. Thank you!";
         statusEl.className = "status ok";
         form.reset();
+        syncEmailFieldValidation();
       } catch (err) {
         console.error(err);
         statusEl.textContent = "Could not reach the server.";
