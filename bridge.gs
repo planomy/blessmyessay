@@ -1,45 +1,32 @@
 /**
- * STUDENT INTAKE → GOOGLE SHEET BRIDGE
+ * STUDENT INTAKE → GOOGLE SHEET BRIDGE (Quikdraft: fetch / send)
  *
- * HOW TO DEPLOY AS A WEB APP
- * --------------------------
- * 1. Open script.google.com, create a project, paste this file (or bind it to your Sheet:
- *    Extensions → Apps Script).
- * 2. Set SPREADSHEET_ID below to your Google Sheet’s ID (from the URL between /d/ and /edit).
- * 3. Row 1 headers should match your sheet (see HEADERS below), e.g.:
- *    Timestamp | Student Name | Student Email | Task Description | Word Count | Teacher Concerns | Essay Text
- * 4. Click Deploy → New deployment → Type: Web app
- *    - Execute as: Me
- *    - Who has access: Anyone (or “Anyone with Google account” if you prefer)
- * 5. Authorize when prompted. Copy the Web App URL and use it as the POST endpoint from your form.
- * 6. Your frontend should POST JSON with Content-Type: application/json.
- *
- * CORS: Browsers send OPTIONS before JSON POST. doOptions and doPost attach Access-Control-*
- * headers on the TextOutput. Use the /exec Web App URL from Deploy → Test deployments / Manage
- * deployments. If fetch still fails, confirm “Who has access” matches your form’s audience.
+ * Deploy: Web app, Execute as: Me, Who has access: Anyone.
+ * CORS: use the /exec URL. doOptions + JSON responses for cross-origin fetches.
  */
 
-/** Replace with your Google Sheet ID from the spreadsheet URL. */
-var SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
-
-/** Sheet name (tab) to write to. */
-var SHEET_NAME = 'Intake';
-
-var HEADERS = [
-  'Timestamp',
-  'Student Name',
-  'Student Email',
-  'Task Description',
-  'Word Count',
-  'Teacher Concerns',
-  'Essay Text'
-];
+const SPREADSHEET_ID = '1tk4_YTBPWFYYQvCE2jgE8AyCNB4OPP65wdahb0qmL7s';
+const SHEET_NAME = 'Submissions';
 
 /**
- * JSON TextOutput for Web App responses. Sets CORS headers when the runtime exposes
- * TextOutput.setHeader (some environments/tutorials use this; the public reference
- * only documents setMimeType—if setHeader is missing, doOptions + JSON MIME still help clients).
+ * 13 columns A–M. G = essay, J = feedback “Marked Essay”, I/K/L = status (sendFeedback writes I, K, L).
  */
+var HEADER_ROW_ = [
+  'Timestamp',
+  'Name',
+  'Email',
+  'Task',
+  'Word Count',
+  'Teacher Concerns',
+  'Essay Draft',
+  'Submitted At',
+  'Status',
+  'Marked Essay',
+  'Date Returned',
+  'Sent',
+  'Source'
+];
+
 function corsJsonTextOutput_(payload) {
   var json = typeof payload === 'string' ? payload : JSON.stringify(payload);
   var out = ContentService.createTextOutput(json)
@@ -52,168 +39,143 @@ function corsJsonTextOutput_(payload) {
   return out;
 }
 
-/**
- * Preflight for cross-origin JSON POST (browsers send OPTIONS first).
- */
 function doOptions() {
   return corsJsonTextOutput_({ ok: true });
 }
 
+function doGet() {
+  return ContentService
+    .createTextOutput('Apps Script running')
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+
 /**
- * Accepts JSON keys (exact names): name, email, task, wordCount, teacherConcerns, essayText
- * (Optional snake_case: word_count, teacher_concerns, essay_text — prefer camelCase from index.html.)
- *
- * Always returns ContentService TextOutput with MIME JSON and CORS headers so browsers can read
- * the response from another origin (e.g. file:// or your static site).
+ * name, email, task, wordCount, teacherConcerns, essay from essayText / essayDraft, submittedAt, source
+ * fetchNext, sendFeedback
  */
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) {
     return corsJsonTextOutput_({ ok: false, error: 'Missing POST body' });
   }
 
-  var raw;
+  var data;
   try {
-    raw = JSON.parse(e.postData.contents);
+    data = JSON.parse(e.postData.contents);
   } catch (err) {
     return corsJsonTextOutput_({ ok: false, error: 'Invalid JSON' });
   }
 
-  /** QUIK DRAFT FETCH — returns next row not marked processed (see isRowProcessed_). */
-  if (raw.action === 'fetchNext') {
+  if (data.action === 'sendFeedback') {
+    return sendFeedbackHandler_(data);
+  }
+
+  if (data.action === 'fetchNext') {
     return fetchNextHandler_();
   }
 
-  /** QUIK DRAFT SEND — email feedback, write J, mark I/K/L processed. */
-  if (raw.action === 'sendFeedback') {
-    return sendFeedbackHandler_(raw);
-  }
-
-  var name = pick_(raw, ['name']);
-  var email = pick_(raw, ['email']);
-  var task = pick_(raw, ['task']);
-  var wordCount = pick_(raw, ['wordCount', 'word_count']);
-  var teacherConcerns = pick_(raw, ['teacherConcerns', 'teacher_concerns']);
-  var essayText = pick_(raw, ['essayText', 'essay_text']);
-
-  if (!name || !email) {
-    return corsJsonTextOutput_({ ok: false, error: 'name and email are required' });
-  }
-
   try {
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sheet = getOrCreateSheet_(ss, SHEET_NAME);
-    ensureHeaderRow_(sheet);
+    var sheet = getSheet_();
+    var essay = pick_(
+      data,
+      ['essayText', 'essay_text', 'essayDraft']
+    );
 
-    // Column order matches HEADERS: Timestamp → … → Essay Text (JSON keys are not the header text).
-    var row = [
+    sheet.appendRow([
       new Date(),
-      String(name),
-      String(email),
-      task != null ? String(task) : '',
-      wordCount != null ? String(wordCount) : '',
-      teacherConcerns != null ? String(teacherConcerns) : '',
-      essayText != null ? String(essayText) : ''
-    ];
+      data.name != null ? String(data.name) : '',
+      data.email != null ? String(data.email) : '',
+      data.task != null ? String(data.task) : '',
+      data.wordCount != null ? String(data.wordCount) : '',
+      data.teacherConcerns != null ? String(data.teacherConcerns) : '',
+      String(essay),
+      data.submittedAt != null ? String(data.submittedAt) : '',
+      '',
+      '',
+      '',
+      '',
+      data.source != null ? String(data.source) : ''
+    ]);
 
-    sheet.appendRow(row);
-
-    return corsJsonTextOutput_({
-      ok: true,
-      message: 'Submission received and saved successfully.'
-    });
+    return corsJsonTextOutput_({ ok: true });
   } catch (err) {
-    return corsJsonTextOutput_({
-      ok: false,
-      error: 'Could not write to spreadsheet. Check SPREADSHEET_ID and permissions.'
-    });
+    return corsJsonTextOutput_({ ok: false, error: String(err && err.message ? err.message : err) });
   }
 }
 
 function pick_(obj, keys) {
   for (var i = 0; i < keys.length; i++) {
-    if (obj[keys[i]] !== undefined && obj[keys[i]] !== null && obj[keys[i]] !== '') {
+    if (
+      obj[keys[i]] !== undefined &&
+      obj[keys[i]] !== null &&
+      obj[keys[i]] !== ''
+    ) {
       return obj[keys[i]];
     }
   }
   return '';
 }
 
-function getOrCreateSheet_(ss, name) {
-  var sh = ss.getSheetByName(name);
-  if (!sh) {
-    sh = ss.insertSheet(name);
+function getSheet_() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_NAME);
+    sheet.getRange(1, 1, 1, HEADER_ROW_.length).setValues([HEADER_ROW_]);
   }
-  return sh;
-}
-
-function ensureHeaderRow_(sheet) {
-  var first = sheet.getRange(1, 1, 1, HEADERS.length).getValues()[0];
-  var empty = true;
-  for (var c = 0; c < first.length; c++) {
-    if (first[c]) {
-      empty = false;
-      break;
-    }
-  }
-  if (empty) {
-    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
-  }
-}
-
-/** Column I (9): teacher marked “Sent”. Column L (12): “YES” = grading complete. Either marks row processed for FETCH. */
-function isRowProcessed_(sheet, row) {
-  var colI = String(sheet.getRange(row, 9).getValue() || '')
-    .trim()
-    .toLowerCase();
-  var colL = sheet.getRange(row, 12).getValue();
-  var lStr = String(colL === true ? 'yes' : colL || '')
-    .trim()
-    .toUpperCase();
-  if (colI === 'sent') return true;
-  if (lStr === 'YES' || lStr === 'TRUE') return true;
-  return false;
+  return sheet;
 }
 
 /**
- * First data row (≥2) that is not processed and has a name or essay in the sheet.
- * Matches quikdraft/index.html: row, name, task, essay, focus / teacherConcerns.
+ * First row (after header) with essay in G and no “finished” value in L (12).
+ * L truthy = skip (matches your original: !sent on column L).
+ * focus = first up to 3 non-empty lines from F, for Quikdraft.
  */
 function fetchNextHandler_() {
   try {
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) {
-      return corsJsonTextOutput_({ ok: false, error: 'Sheet not found: ' + SHEET_NAME });
+    const sheet = getSheet_();
+    const values = sheet.getDataRange().getValues();
+    for (var i = 1; i < values.length; i++) {
+      var rowData = values[i];
+      var essayDraft = rowData[6];
+      var sent = rowData[11];
+      if (essayDraft && !sent) {
+        var focusRaw = String(rowData[5] || '');
+        var focus = focusRaw
+          .split(/\n|,/g)
+          .map(function (f) {
+            return f.trim();
+          })
+          .filter(function (f) {
+            return f !== '';
+          })
+          .slice(0, 3)
+          .join('\n');
+        return corsJsonTextOutput_({
+          row: i + 1,
+          name: rowData[1] != null ? String(rowData[1]) : '',
+          task: rowData[3] != null ? String(rowData[3]) : '',
+          focus: focus,
+          teacherConcerns: focusRaw,
+          essay: essayDraft != null ? String(essayDraft) : ''
+        });
+      }
     }
-    var lastRow = sheet.getLastRow();
-    if (lastRow < 2) {
-      return corsJsonTextOutput_({ row: null });
-    }
-    for (var r = 2; r <= lastRow; r++) {
-      if (isRowProcessed_(sheet, r)) continue;
-      var name = sheet.getRange(r, 2).getValue();
-      var essay = sheet.getRange(r, 7).getValue();
-      if (!name && !essay) continue;
-      var concerns = String(sheet.getRange(r, 6).getValue() || '');
-      return corsJsonTextOutput_({
-        row: r,
-        name: name != null ? String(name) : '',
-        task: String(sheet.getRange(r, 4).getValue() || ''),
-        essay: essay != null ? String(essay) : '',
-        teacherConcerns: concerns,
-        focus: concerns
-      });
-    }
-    return corsJsonTextOutput_({ row: null });
+    return corsJsonTextOutput_({ row: null, name: '', task: '', essay: '' });
   } catch (err) {
-    return corsJsonTextOutput_({ ok: false, error: String(err && err.message ? err.message : err) });
+    return corsJsonTextOutput_({
+      ok: false,
+      error: String(err && err.message ? err.message : err)
+    });
   }
 }
 
-/** QUIK DRAFT — column J feedback text, C email, I/K/L status (same indices as fetchNext skip rules). */
 var FEEDBACK_TEXT_COL = 10;
 var STUDENT_EMAIL_COL = 3;
 var STUDENT_NAME_COL = 2;
+var TASK_COL = 4;
+var STATUS_COL = 9;
+var DATE_RETURNED_COL = 11;
+var SENT_COL = 12;
 
 function escapeHtml_(s) {
   return String(s)
@@ -224,55 +186,60 @@ function escapeHtml_(s) {
 }
 
 function sendFeedbackHandler_(data) {
-  var row = data.row;
+  var row = Number(data.row);
   var feedbackText = data.feedbackText != null ? String(data.feedbackText) : '';
   var feedbackHtml = data.feedbackHtml != null ? String(data.feedbackHtml) : '';
-
-  if (!row || Number(row) < 2) {
+  if (!row || row < 2) {
     return corsJsonTextOutput_({ ok: false, error: 'Invalid row' });
   }
-
   if (!feedbackText.trim() && !feedbackHtml.trim()) {
     return corsJsonTextOutput_({ ok: false, error: 'Missing feedback text' });
   }
-
+  var sheet;
+  var email;
   try {
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sheet = ss.getSheetByName(SHEET_NAME);
-    if (!sheet) {
-      return corsJsonTextOutput_({ ok: false, error: 'Sheet not found: ' + SHEET_NAME });
-    }
-
-    var email = String(sheet.getRange(Number(row), STUDENT_EMAIL_COL).getValue() || '').trim();
+    sheet = getSheet_();
+    email = String(sheet.getRange(row, STUDENT_EMAIL_COL).getValue() || '')
+      .trim();
     if (!email) {
       return corsJsonTextOutput_({ ok: false, error: 'No student email in row' });
     }
-
-    var studentName = String(sheet.getRange(Number(row), STUDENT_NAME_COL).getValue() || '').trim();
-    var subject = studentName ? ('Writing feedback: ' + studentName) : 'Your writing feedback';
-
-    sheet.getRange(Number(row), FEEDBACK_TEXT_COL).setValue(feedbackText);
-
+    var name = sheet.getRange(row, STUDENT_NAME_COL).getValue();
+    var task = sheet.getRange(row, TASK_COL).getValue();
+    sheet.getRange(row, FEEDBACK_TEXT_COL).setValue(feedbackText);
+    var taskStr = task != null ? String(task).trim() : '';
+    var nameStr = name != null ? String(name).trim() : '';
+    var subject;
+    if (taskStr) {
+      subject = 'Feedback for your ' + taskStr;
+    } else if (nameStr) {
+      subject = 'Writing feedback: ' + nameStr;
+    } else {
+      subject = 'Your writing feedback';
+    }
     var plainTextBody = feedbackText;
     var htmlBody = feedbackHtml;
-    if (!htmlBody.trim()) {
+    if (htmlBody.trim()) {
+      // Root wrapper so clients get a full block; Quikdraft already inlines blue/highlight styles
+      htmlBody =
+        '<div style="font-family:Segoe UI,system-ui,sans-serif;font-size:11pt;line-height:1.6;color:#1f2937;max-width:100%;">' +
+        feedbackHtml +
+        '</div>';
+    } else {
       htmlBody =
         '<div style="font-family:Segoe UI,system-ui,sans-serif;font-size:11pt;line-height:1.6;color:#334155;">' +
         escapeHtml_(plainTextBody).replace(/\n/g, '<br>') +
         '</div>';
     }
-
     MailApp.sendEmail({
       to: email,
       subject: subject,
       body: plainTextBody,
       htmlBody: htmlBody
     });
-
-    sheet.getRange(Number(row), 9).setValue('Sent');
-    sheet.getRange(Number(row), 11).setValue(new Date());
-    sheet.getRange(Number(row), 12).setValue('YES');
-
+    sheet.getRange(row, STATUS_COL).setValue('Sent');
+    sheet.getRange(row, DATE_RETURNED_COL).setValue(new Date());
+    sheet.getRange(row, SENT_COL).setValue('YES');
     return corsJsonTextOutput_({ ok: true, message: 'Sent' });
   } catch (err) {
     return corsJsonTextOutput_({
